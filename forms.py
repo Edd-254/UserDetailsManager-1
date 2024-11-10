@@ -38,7 +38,7 @@ class RegistrationForm(FlaskForm):
     
     phone = StringField('Phone Number', validators=[
         DataRequired(),
-        Regexp(r'^\+?1?\d{9,15}$', message="Invalid phone number format")
+        Regexp(r'^\(\d{3}\) \d{3}-\d{4}$', message="Phone number must be in format (XXX) XXX-XXXX")
     ])
     
     email = StringField('Email', validators=[
@@ -70,7 +70,7 @@ class EditProfileForm(FlaskForm):
     
     phone = StringField('Phone Number', validators=[
         DataRequired(),
-        Regexp(r'^\+?1?\d{9,15}$', message="Invalid phone number format")
+        Regexp(r'^\(\d{3}\) \d{3}-\d{4}$', message="Phone number must be in format (XXX) XXX-XXXX")
     ])
     
     email = StringField('Email', validators=[

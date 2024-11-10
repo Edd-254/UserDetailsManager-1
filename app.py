@@ -5,6 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.security import generate_password_hash
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy import text
 import pdfkit
 
 # Configure logging with more detailed format
@@ -32,7 +33,7 @@ def init_db():
         with app.app_context():
             # Test database connection with detailed error handling
             try:
-                db.session.execute('SELECT 1')
+                db.session.execute(text('SELECT 1'))
                 logger.info("Database connection test successful")
             except SQLAlchemyError as e:
                 logger.error(f"Database connection test failed: {str(e)}")
@@ -74,16 +75,16 @@ def register():
                 return render_template('register.html', form=form)
 
             # Create new user
-            user = User(
-                user_id=form.user_id.data,
-                password_hash=generate_password_hash(form.password.data),
-                first_name=form.first_name.data,
-                last_name=form.last_name.data,
-                address=form.address.data,
-                gender=form.gender.data,
-                phone=form.phone.data,
-                email=form.email.data
-            )
+            user = User()
+            user.user_id = form.user_id.data
+            user.password_hash = generate_password_hash(form.password.data)
+            user.first_name = form.first_name.data
+            user.last_name = form.last_name.data
+            user.address = form.address.data
+            user.gender = form.gender.data
+            user.phone = form.phone.data
+            user.email = form.email.data
+            
             db.session.add(user)
             db.session.commit()
             logger.info(f"New user registered successfully: {user.user_id}")
@@ -127,7 +128,21 @@ def edit_profile(user_id):
         
         if request.method == 'POST' and form.validate():
             try:
-                form.populate_obj(user)
+                # Check if email is being changed and if it's already taken
+                if user.email != form.email.data:
+                    existing_user = User.query.filter_by(email=form.email.data).first()
+                    if existing_user:
+                        flash('Email already registered. Please use another email.', 'danger')
+                        return render_template('edit_profile.html', form=form, user=user)
+
+                # Update user fields
+                user.first_name = form.first_name.data
+                user.last_name = form.last_name.data
+                user.address = form.address.data
+                user.gender = form.gender.data
+                user.phone = form.phone.data
+                user.email = form.email.data
+                
                 db.session.commit()
                 logger.info(f"Profile updated successfully for user: {user.user_id}")
                 flash('Profile updated successfully!', 'success')

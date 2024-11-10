@@ -4,13 +4,13 @@ from flask import Flask, render_template, request, flash, redirect, url_for, mak
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.security import generate_password_hash
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from sqlalchemy import text
 import pdfkit
 
 # Configure logging with more detailed format
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -20,10 +20,19 @@ app = Flask(__name__)
 
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+
+# Get database URL and verify format
+db_url = os.environ.get("DATABASE_URL")
+if not db_url:
+    logger.critical("DATABASE_URL environment variable is not set")
+    raise ValueError("DATABASE_URL must be set")
+
+logger.info(f"Database URL format: {db_url.split(':')[0]}")
+app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
+    "echo": True  # Enable SQL statement logging
 }
 
 # Initialize SQLAlchemy
@@ -42,16 +51,30 @@ def init_db():
         with app.app_context():
             # Test database connection with detailed error handling
             try:
-                db.session.execute(text('SELECT 1'))
+                logger.debug("Testing database connection...")
+                db.session.execute(text('SELECT version()'))
                 logger.info("Database connection test successful")
+            except OperationalError as e:
+                logger.error(f"Database connection failed: {str(e)}")
+                return False
             except SQLAlchemyError as e:
-                logger.error(f"Database connection test failed: {str(e)}")
+                logger.error(f"Database query failed: {str(e)}")
                 return False
             
             try:
+                # Get list of existing tables
+                inspector = db.inspect(db.engine)
+                existing_tables = inspector.get_table_names()
+                logger.debug(f"Existing tables: {existing_tables}")
+                
                 # Create tables
                 db.create_all()
                 logger.info("Database tables created successfully")
+                
+                # Verify tables were created
+                new_tables = db.inspect(db.engine).get_table_names()
+                logger.debug(f"Tables after creation: {new_tables}")
+                
                 return True
             except SQLAlchemyError as e:
                 logger.error(f"Failed to create database tables: {str(e)}")
@@ -66,51 +89,65 @@ from models import User
 @app.route('/', methods=['GET', 'POST'])
 def register():
     form = RegistrationForm()
-    if request.method == 'POST' and form.validate():
-        try:
-            # Check if user already exists
-            existing_user = User.query.filter(
-                (User.user_id == form.user_id.data) | 
-                (User.email == form.email.data)
-            ).first()
-            
-            if existing_user:
-                if existing_user.user_id == form.user_id.data:
-                    flash('User ID already taken. Please choose another.', 'danger')
-                else:
-                    flash('Email already registered. Please use another email.', 'danger')
-                return render_template('register.html', form=form)
+    if request.method == 'POST':
+        logger.info("Processing registration request")
+        logger.debug(f"Form data: {form.data}")
+        
+        if form.validate():
+            try:
+                # Check if user already exists
+                existing_user = User.query.filter(
+                    (User.user_id == form.user_id.data) | 
+                    (User.email == form.email.data)
+                ).first()
+                
+                if existing_user:
+                    if existing_user.user_id == form.user_id.data:
+                        flash('User ID already taken. Please choose another.', 'danger')
+                    else:
+                        flash('Email already registered. Please use another email.', 'danger')
+                    return render_template('register.html', form=form)
 
-            # Create new user
-            user = User()
-            user.user_id = form.user_id.data
-            if form.password.data:
-                user.password_hash = generate_password_hash(form.password.data)
-            user.first_name = form.first_name.data
-            user.last_name = form.last_name.data
-            user.address = form.address.data
-            user.gender = form.gender.data
-            user.phone = form.phone.data
-            user.email = form.email.data
-            
-            db.session.add(user)
-            db.session.commit()
-            logger.info(f"New user registered successfully: {user.user_id}")
-            flash('Registration successful! You can now log in.', 'success')
-            return redirect(url_for('users'))
+                # Create new user
+                user = User()
+                user.user_id = form.user_id.data
+                if form.password.data:
+                    user.password_hash = generate_password_hash(form.password.data)
+                user.first_name = form.first_name.data
+                user.last_name = form.last_name.data
+                user.address = form.address.data
+                user.gender = form.gender.data
+                user.phone = form.phone.data
+                user.email = form.email.data
+                
+                logger.debug(f"Creating new user: {user}")
+                db.session.add(user)
+                db.session.commit()
+                logger.info(f"New user registered successfully: {user}")
+                flash('Registration successful! You can now log in.', 'success')
+                return redirect(url_for('users'))
 
-        except IntegrityError as e:
-            db.session.rollback()
-            logger.error(f"Database integrity error during registration: {str(e)}")
-            flash('Registration failed due to data conflict. Please try again.', 'danger')
-        except SQLAlchemyError as e:
-            db.session.rollback()
-            logger.error(f"Database error during registration: {str(e)}")
-            flash('Registration failed due to database error. Please try again.', 'danger')
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Unexpected error during registration: {str(e)}")
-            flash('An unexpected error occurred. Please try again.', 'danger')
+            except IntegrityError as e:
+                db.session.rollback()
+                logger.error(f"Database integrity error during registration: {str(e)}")
+                flash('Registration failed due to data conflict. Please try again.', 'danger')
+            except OperationalError as e:
+                db.session.rollback()
+                logger.error(f"Database connection error during registration: {str(e)}")
+                flash('Database connection error. Please try again later.', 'danger')
+            except SQLAlchemyError as e:
+                db.session.rollback()
+                logger.error(f"Database error during registration: {str(e)}")
+                flash('Registration failed due to database error. Please try again.', 'danger')
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Unexpected error during registration: {str(e)}")
+                flash('An unexpected error occurred. Please try again.', 'danger')
+        else:
+            logger.warning(f"Form validation failed. Errors: {form.errors}")
+            for field, errors in form.errors.items():
+                for error in errors:
+                    flash(f'{field}: {error}', 'danger')
     
     return render_template('register.html', form=form)
 

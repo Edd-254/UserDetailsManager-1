@@ -137,7 +137,7 @@ def edit_profile(user_id):
         
         if request.method == 'POST':
             logger.info(f"Processing POST request for user_id: {user_id}")
-            logger.debug(f"Form data received: {request.form}")
+            form = EditProfileForm(request.form)
             
             if form.validate():
                 logger.info("Form validation successful")
@@ -145,7 +145,11 @@ def edit_profile(user_id):
                     # Check if email is being changed and if it's already taken
                     if user.email != form.email.data:
                         logger.info(f"Email change detected: {user.email} -> {form.email.data}")
-                        existing_user = User.query.filter_by(email=form.email.data).first()
+                        existing_user = User.query.filter(
+                            (User.email == form.email.data) & 
+                            (User.id != user_id)
+                        ).first()
+                        
                         if existing_user:
                             logger.warning(f"Email {form.email.data} already registered")
                             flash('Email already registered. Please use another email.', 'danger')
@@ -153,12 +157,7 @@ def edit_profile(user_id):
 
                     # Update user fields
                     logger.info("Updating user fields")
-                    user.first_name = form.first_name.data
-                    user.last_name = form.last_name.data
-                    user.address = form.address.data
-                    user.gender = form.gender.data
-                    user.phone = form.phone.data
-                    user.email = form.email.data
+                    form.populate_obj(user)
                     
                     db.session.commit()
                     logger.info(f"Profile updated successfully for user: {user.user_id}")
@@ -175,9 +174,10 @@ def edit_profile(user_id):
                     flash('Database error occurred. Please try again.', 'danger')
             else:
                 logger.warning(f"Form validation failed. Errors: {form.errors}")
-                flash('Please correct the errors in the form.', 'danger')
-            
-        logger.info("Rendering edit profile template")
+                for field, errors in form.errors.items():
+                    for error in errors:
+                        flash(f'{field}: {error}', 'danger')
+        
         return render_template('edit_profile.html', form=form, user=user)
     
     except Exception as e:

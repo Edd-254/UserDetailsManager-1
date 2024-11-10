@@ -46,3 +46,35 @@ class RegistrationForm(FlaskForm):
         Email(),
         Length(max=120)
     ])
+
+class EditProfileForm(FlaskForm):
+    first_name = StringField('First Name', validators=[
+        DataRequired(),
+        Length(max=64)
+    ])
+    
+    last_name = StringField('Last Name', validators=[
+        DataRequired(),
+        Length(max=64)
+    ])
+    
+    address = TextAreaField('Address', validators=[
+        DataRequired()
+    ])
+    
+    gender = SelectField('Gender', choices=[
+        ('male', 'Male'),
+        ('female', 'Female'),
+        ('other', 'Other')
+    ], validators=[DataRequired()])
+    
+    phone = StringField('Phone Number', validators=[
+        DataRequired(),
+        Regexp(r'^\+?1?\d{9,15}$', message="Invalid phone number format")
+    ])
+    
+    email = StringField('Email', validators=[
+        DataRequired(),
+        Email(),
+        Length(max=120)
+    ])

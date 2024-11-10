@@ -44,7 +44,7 @@ def init_db():
 db.init_app(app)
 
 from models import User
-from forms import RegistrationForm
+from forms import RegistrationForm, EditProfileForm
 
 @app.route('/', methods=['GET', 'POST'])
 def register():
@@ -81,6 +81,25 @@ def users():
         logger.error(f"Error fetching users: {str(e)}")
         flash('Error loading users.', 'danger')
         return redirect(url_for('register'))
+
+@app.route('/edit_profile/<int:user_id>', methods=['GET', 'POST'])
+def edit_profile(user_id):
+    try:
+        user = User.query.get_or_404(user_id)
+        form = EditProfileForm(obj=user)
+        
+        if request.method == 'POST' and form.validate():
+            form.populate_obj(user)
+            db.session.commit()
+            logger.info(f"Profile updated for user: {user.user_id}")
+            flash('Profile updated successfully!', 'success')
+            return redirect(url_for('users'))
+            
+        return render_template('edit_profile.html', form=form, user=user)
+    except Exception as e:
+        logger.error(f"Error editing profile for user {user_id}: {str(e)}")
+        flash('Error updating profile. Please try again.', 'danger')
+        return redirect(url_for('users'))
 
 @app.route('/generate_pdf/<int:user_id>')
 def generate_pdf(user_id):

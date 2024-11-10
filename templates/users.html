@@ -25,10 +25,16 @@
                         <td>{{ user.email }}</td>
                         <td>{{ user.phone }}</td>
                         <td>
-                            <a href="{{ url_for('generate_pdf', user_id=user.id) }}" 
-                               class="btn btn-sm btn-secondary">
-                                Download PDF
-                            </a>
+                            <div class="btn-group">
+                                <a href="{{ url_for('edit_profile', user_id=user.id) }}" 
+                                   class="btn btn-sm btn-primary">
+                                    Edit
+                                </a>
+                                <a href="{{ url_for('generate_pdf', user_id=user.id) }}" 
+                                   class="btn btn-sm btn-secondary">
+                                    Download PDF
+                                </a>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}

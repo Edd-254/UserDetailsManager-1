@@ -4,12 +4,13 @@ from flask import Flask, render_template, request, flash, redirect, url_for, mak
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.security import generate_password_hash
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 import pdfkit
 
-# Configure logging
+# Configure logging with more detailed format
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -27,18 +28,26 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 
 def init_db():
     try:
-        logger.info("Attempting to create database tables...")
+        logger.info("Starting database initialization...")
         with app.app_context():
-            # Test database connection
-            db.session.execute('SELECT 1')
-            logger.info("Database connection successful")
+            # Test database connection with detailed error handling
+            try:
+                db.session.execute('SELECT 1')
+                logger.info("Database connection test successful")
+            except SQLAlchemyError as e:
+                logger.error(f"Database connection test failed: {str(e)}")
+                return False
             
-            # Create tables
-            db.create_all()
-            logger.info("Database tables created successfully")
-            return True
+            try:
+                # Create tables
+                db.create_all()
+                logger.info("Database tables created successfully")
+                return True
+            except SQLAlchemyError as e:
+                logger.error(f"Failed to create database tables: {str(e)}")
+                return False
     except Exception as e:
-        logger.error(f"Database initialization failed: {str(e)}")
+        logger.error(f"Database initialization failed with unexpected error: {str(e)}")
         return False
 
 db.init_app(app)
@@ -51,6 +60,20 @@ def register():
     form = RegistrationForm()
     if request.method == 'POST' and form.validate():
         try:
+            # Check if user already exists
+            existing_user = User.query.filter(
+                (User.user_id == form.user_id.data) | 
+                (User.email == form.email.data)
+            ).first()
+            
+            if existing_user:
+                if existing_user.user_id == form.user_id.data:
+                    flash('User ID already taken. Please choose another.', 'danger')
+                else:
+                    flash('Email already registered. Please use another email.', 'danger')
+                return render_template('register.html', form=form)
+
+            # Create new user
             user = User(
                 user_id=form.user_id.data,
                 password_hash=generate_password_hash(form.password.data),
@@ -63,13 +86,23 @@ def register():
             )
             db.session.add(user)
             db.session.commit()
-            logger.info(f"New user registered: {user.user_id}")
-            flash('Registration successful!', 'success')
+            logger.info(f"New user registered successfully: {user.user_id}")
+            flash('Registration successful! You can now log in.', 'success')
             return redirect(url_for('users'))
+
+        except IntegrityError as e:
+            db.session.rollback()
+            logger.error(f"Database integrity error during registration: {str(e)}")
+            flash('Registration failed due to data conflict. Please try again.', 'danger')
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logger.error(f"Database error during registration: {str(e)}")
+            flash('Registration failed due to database error. Please try again.', 'danger')
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Registration failed: {str(e)}")
-            flash('Registration failed. Please try again.', 'danger')
+            logger.error(f"Unexpected error during registration: {str(e)}")
+            flash('An unexpected error occurred. Please try again.', 'danger')
+    
     return render_template('register.html', form=form)
 
 @app.route('/users')
@@ -77,9 +110,13 @@ def users():
     try:
         users = User.query.all()
         return render_template('users.html', users=users)
+    except SQLAlchemyError as e:
+        logger.error(f"Database error while fetching users: {str(e)}")
+        flash('Error loading users. Please try again.', 'danger')
+        return redirect(url_for('register'))
     except Exception as e:
-        logger.error(f"Error fetching users: {str(e)}")
-        flash('Error loading users.', 'danger')
+        logger.error(f"Unexpected error while fetching users: {str(e)}")
+        flash('An unexpected error occurred while loading users.', 'danger')
         return redirect(url_for('register'))
 
 @app.route('/edit_profile/<int:user_id>', methods=['GET', 'POST'])
@@ -89,11 +126,20 @@ def edit_profile(user_id):
         form = EditProfileForm(obj=user)
         
         if request.method == 'POST' and form.validate():
-            form.populate_obj(user)
-            db.session.commit()
-            logger.info(f"Profile updated for user: {user.user_id}")
-            flash('Profile updated successfully!', 'success')
-            return redirect(url_for('users'))
+            try:
+                form.populate_obj(user)
+                db.session.commit()
+                logger.info(f"Profile updated successfully for user: {user.user_id}")
+                flash('Profile updated successfully!', 'success')
+                return redirect(url_for('users'))
+            except IntegrityError as e:
+                db.session.rollback()
+                logger.error(f"Database integrity error while updating profile: {str(e)}")
+                flash('Update failed due to data conflict. Please try again.', 'danger')
+            except SQLAlchemyError as e:
+                db.session.rollback()
+                logger.error(f"Database error while updating profile: {str(e)}")
+                flash('Database error occurred. Please try again.', 'danger')
             
         return render_template('edit_profile.html', form=form, user=user)
     except Exception as e:
@@ -113,7 +159,7 @@ def generate_pdf(user_id):
         return response
     except Exception as e:
         logger.error(f"Error generating PDF for user {user_id}: {str(e)}")
-        flash('Error generating PDF.', 'danger')
+        flash('Error generating PDF. Please try again.', 'danger')
         return redirect(url_for('users'))
 
 # Initialize database

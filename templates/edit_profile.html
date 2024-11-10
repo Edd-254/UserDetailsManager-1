@@ -10,18 +10,19 @@
             <div class="card-body">
                 <form method="POST" id="editProfileForm" class="needs-validation" novalidate>
                     {{ form.csrf_token }}
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="first_name" class="form-label">First Name</label>
-                            {{ form.first_name(class="form-control", id="first_name") }}
+                            {{ form.first_name(class="form-control", id="first_name", required=true) }}
                             <div class="invalid-feedback">
                                 Please enter your first name
                             </div>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="last_name" class="form-label">Last Name</label>
-                            {{ form.last_name(class="form-control", id="last_name") }}
+                            {{ form.last_name(class="form-control", id="last_name", required=true) }}
                             <div class="invalid-feedback">
                                 Please enter your last name
                             </div>
@@ -30,7 +31,7 @@
 
                     <div class="mb-3">
                         <label for="address" class="form-label">Address</label>
-                        {{ form.address(class="form-control", id="address", rows="3") }}
+                        {{ form.address(class="form-control", id="address", rows="3", required=true) }}
                         <div class="invalid-feedback">
                             Please enter your address
                         </div>
@@ -38,7 +39,7 @@
 
                     <div class="mb-3">
                         <label for="gender" class="form-label">Gender</label>
-                        {{ form.gender(class="form-select", id="gender") }}
+                        {{ form.gender(class="form-select", id="gender", required=true) }}
                         <div class="invalid-feedback">
                             Please select your gender
                         </div>
@@ -46,15 +47,15 @@
 
                     <div class="mb-3">
                         <label for="phone" class="form-label">Phone Number</label>
-                        {{ form.phone(class="form-control", id="phone") }}
+                        {{ form.phone(class="form-control", id="phone", required=true, pattern="\(\d{3}\) \d{3}-\d{4}") }}
                         <div class="invalid-feedback">
-                            Please enter a valid phone number
+                            Please enter a valid phone number in format (XXX) XXX-XXXX
                         </div>
                     </div>
 
                     <div class="mb-3">
                         <label for="email" class="form-label">Email</label>
-                        {{ form.email(class="form-control", id="email") }}
+                        {{ form.email(class="form-control", id="email", required=true, type="email") }}
                         <div class="invalid-feedback">
                             Please enter a valid email address
                         </div>

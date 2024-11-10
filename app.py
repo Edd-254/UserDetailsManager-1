@@ -15,17 +15,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class Base(DeclarativeBase):
-    pass
-
-db = SQLAlchemy(model_class=Base)
+# Initialize Flask app first
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or "a secret key"
+
+# Configure Flask app
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
 }
+
+# Initialize SQLAlchemy
+class Base(DeclarativeBase):
+    pass
+
+db = SQLAlchemy(model_class=Base)
+db.init_app(app)
+
+# Import forms after app initialization
+from forms import RegistrationForm, EditProfileForm
 
 def init_db():
     try:
@@ -51,10 +60,8 @@ def init_db():
         logger.error(f"Database initialization failed with unexpected error: {str(e)}")
         return False
 
-db.init_app(app)
-
+# Import models after db initialization
 from models import User
-from forms import RegistrationForm, EditProfileForm
 
 @app.route('/', methods=['GET', 'POST'])
 def register():
@@ -77,7 +84,8 @@ def register():
             # Create new user
             user = User()
             user.user_id = form.user_id.data
-            user.password_hash = generate_password_hash(form.password.data)
+            if form.password.data:
+                user.password_hash = generate_password_hash(form.password.data)
             user.first_name = form.first_name.data
             user.last_name = form.last_name.data
             user.address = form.address.data
@@ -123,40 +131,55 @@ def users():
 @app.route('/edit_profile/<int:user_id>', methods=['GET', 'POST'])
 def edit_profile(user_id):
     try:
+        logger.info(f"Accessing edit profile page for user_id: {user_id}")
         user = User.query.get_or_404(user_id)
         form = EditProfileForm(obj=user)
         
-        if request.method == 'POST' and form.validate():
-            try:
-                # Check if email is being changed and if it's already taken
-                if user.email != form.email.data:
-                    existing_user = User.query.filter_by(email=form.email.data).first()
-                    if existing_user:
-                        flash('Email already registered. Please use another email.', 'danger')
-                        return render_template('edit_profile.html', form=form, user=user)
-
-                # Update user fields
-                user.first_name = form.first_name.data
-                user.last_name = form.last_name.data
-                user.address = form.address.data
-                user.gender = form.gender.data
-                user.phone = form.phone.data
-                user.email = form.email.data
-                
-                db.session.commit()
-                logger.info(f"Profile updated successfully for user: {user.user_id}")
-                flash('Profile updated successfully!', 'success')
-                return redirect(url_for('users'))
-            except IntegrityError as e:
-                db.session.rollback()
-                logger.error(f"Database integrity error while updating profile: {str(e)}")
-                flash('Update failed due to data conflict. Please try again.', 'danger')
-            except SQLAlchemyError as e:
-                db.session.rollback()
-                logger.error(f"Database error while updating profile: {str(e)}")
-                flash('Database error occurred. Please try again.', 'danger')
+        if request.method == 'POST':
+            logger.info(f"Processing POST request for user_id: {user_id}")
+            logger.debug(f"Form data received: {request.form}")
             
+            if form.validate():
+                logger.info("Form validation successful")
+                try:
+                    # Check if email is being changed and if it's already taken
+                    if user.email != form.email.data:
+                        logger.info(f"Email change detected: {user.email} -> {form.email.data}")
+                        existing_user = User.query.filter_by(email=form.email.data).first()
+                        if existing_user:
+                            logger.warning(f"Email {form.email.data} already registered")
+                            flash('Email already registered. Please use another email.', 'danger')
+                            return render_template('edit_profile.html', form=form, user=user)
+
+                    # Update user fields
+                    logger.info("Updating user fields")
+                    user.first_name = form.first_name.data
+                    user.last_name = form.last_name.data
+                    user.address = form.address.data
+                    user.gender = form.gender.data
+                    user.phone = form.phone.data
+                    user.email = form.email.data
+                    
+                    db.session.commit()
+                    logger.info(f"Profile updated successfully for user: {user.user_id}")
+                    flash('Profile updated successfully!', 'success')
+                    return redirect(url_for('users'))
+                
+                except IntegrityError as e:
+                    db.session.rollback()
+                    logger.error(f"Database integrity error while updating profile: {str(e)}")
+                    flash('Update failed due to data conflict. Please try again.', 'danger')
+                except SQLAlchemyError as e:
+                    db.session.rollback()
+                    logger.error(f"Database error while updating profile: {str(e)}")
+                    flash('Database error occurred. Please try again.', 'danger')
+            else:
+                logger.warning(f"Form validation failed. Errors: {form.errors}")
+                flash('Please correct the errors in the form.', 'danger')
+            
+        logger.info("Rendering edit profile template")
         return render_template('edit_profile.html', form=form, user=user)
+    
     except Exception as e:
         logger.error(f"Error editing profile for user {user_id}: {str(e)}")
         flash('Error updating profile. Please try again.', 'danger')
@@ -177,6 +200,6 @@ def generate_pdf(user_id):
         flash('Error generating PDF. Please try again.', 'danger')
         return redirect(url_for('users'))
 
-# Initialize database
+# Initialize database if needed
 if not init_db():
     logger.critical("Failed to initialize database. Application may not function correctly.")

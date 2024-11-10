@@ -135,45 +135,51 @@ def edit_profile(user_id):
         user = User.query.get_or_404(user_id)
         form = EditProfileForm(obj=user)
         
-        if request.method == 'POST':
-            logger.info(f"Processing POST request for user_id: {user_id}")
-            form = EditProfileForm(request.form)
+        if form.validate_on_submit():
+            logger.info(f"Processing profile update for user_id: {user_id}")
+            logger.debug(f"Form data received: {form.data}")
             
-            if form.validate():
-                logger.info("Form validation successful")
-                try:
-                    # Check if email is being changed and if it's already taken
-                    if user.email != form.email.data:
-                        logger.info(f"Email change detected: {user.email} -> {form.email.data}")
-                        existing_user = User.query.filter(
-                            (User.email == form.email.data) & 
-                            (User.id != user_id)
-                        ).first()
-                        
-                        if existing_user:
-                            logger.warning(f"Email {form.email.data} already registered")
-                            flash('Email already registered. Please use another email.', 'danger')
-                            return render_template('edit_profile.html', form=form, user=user)
-
-                    # Update user fields
-                    logger.info("Updating user fields")
-                    form.populate_obj(user)
+            try:
+                # Check if email is being changed and if it's already taken
+                if user.email != form.email.data:
+                    logger.info(f"Email change detected: {user.email} -> {form.email.data}")
+                    existing_user = User.query.filter(
+                        (User.email == form.email.data) & 
+                        (User.id != user_id)
+                    ).first()
                     
-                    db.session.commit()
-                    logger.info(f"Profile updated successfully for user: {user.user_id}")
-                    flash('Profile updated successfully!', 'success')
-                    return redirect(url_for('users'))
+                    if existing_user:
+                        logger.warning(f"Email {form.email.data} already registered")
+                        flash('Email already registered. Please use another email.', 'danger')
+                        return render_template('edit_profile.html', form=form, user=user)
+
+                # Begin transaction
+                logger.debug("Starting database transaction for profile update")
                 
-                except IntegrityError as e:
-                    db.session.rollback()
-                    logger.error(f"Database integrity error while updating profile: {str(e)}")
-                    flash('Update failed due to data conflict. Please try again.', 'danger')
-                except SQLAlchemyError as e:
-                    db.session.rollback()
-                    logger.error(f"Database error while updating profile: {str(e)}")
-                    flash('Database error occurred. Please try again.', 'danger')
-            else:
-                logger.warning(f"Form validation failed. Errors: {form.errors}")
+                # Update user fields using form data
+                form.populate_obj(user)
+                logger.debug(f"Updated user object with form data: {user.first_name} {user.last_name}")
+                
+                # Commit changes
+                logger.debug("Attempting to commit changes to database")
+                db.session.commit()
+                logger.info(f"Profile updated successfully for user: {user.user_id}")
+                
+                flash('Profile updated successfully!', 'success')
+                return redirect(url_for('users'))
+            
+            except IntegrityError as e:
+                db.session.rollback()
+                logger.error(f"Database integrity error while updating profile: {str(e)}")
+                flash('Update failed due to data conflict. Please try again.', 'danger')
+            except SQLAlchemyError as e:
+                db.session.rollback()
+                logger.error(f"Database error while updating profile: {str(e)}")
+                flash('Database error occurred. Please try again.', 'danger')
+        else:
+            if request.method == 'POST':
+                logger.warning("Form validation failed")
+                logger.debug(f"Form errors: {form.errors}")
                 for field, errors in form.errors.items():
                     for error in errors:
                         flash(f'{field}: {error}', 'danger')

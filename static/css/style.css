@@ -18,6 +18,20 @@
     margin-bottom: 0;
 }
 
+.btn-group {
+    gap: 0.25rem;
+}
+
+.btn-primary {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+}
+
+.btn-primary:hover {
+    background-color: var(--bs-primary-dark);
+    border-color: var(--bs-primary-dark);
+}
+
 .btn-secondary {
     background-color: var(--bs-secondary);
     border-color: var(--bs-secondary);
@@ -36,4 +50,17 @@
 .invalid-feedback {
     font-size: 0.875rem;
     color: var(--bs-danger);
+}
+
+.table td .btn-group {
+    opacity: 0.85;
+    transition: opacity 0.2s;
+}
+
+.table tr:hover td .btn-group {
+    opacity: 1;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.75rem;
 }

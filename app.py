@@ -1,11 +1,12 @@
 import os
 import logging
-from flask import Flask, render_template, request, flash, redirect, url_for, make_response
+from flask import Flask, render_template, request, flash, redirect, url_for, make_response, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
-from sqlalchemy import text
+from sqlalchemy import text, func
+from functools import wraps
 import pdfkit
 
 # Configure logging with more detailed format
@@ -43,13 +44,12 @@ db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
 # Import forms after app initialization
-from forms import RegistrationForm, EditProfileForm
+from forms import RegistrationForm, EditProfileForm, LoginForm
 
 def init_db():
     try:
         logger.info("Starting database initialization...")
         with app.app_context():
-            # Test database connection with detailed error handling
             try:
                 logger.debug("Testing database connection...")
                 db.session.execute(text('SELECT version()'))
@@ -62,16 +62,13 @@ def init_db():
                 return False
             
             try:
-                # Get list of existing tables
                 inspector = db.inspect(db.engine)
                 existing_tables = inspector.get_table_names()
                 logger.debug(f"Existing tables: {existing_tables}")
                 
-                # Create tables
                 db.create_all()
                 logger.info("Database tables created successfully")
                 
-                # Verify tables were created
                 new_tables = db.inspect(db.engine).get_table_names()
                 logger.debug(f"Tables after creation: {new_tables}")
                 
@@ -86,8 +83,52 @@ def init_db():
 # Import models after db initialization
 from models import User
 
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('is_admin'):
+            flash('You must be an admin to access this page.', 'danger')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if 'user_id' in session:
+        return redirect(url_for('users'))
+        
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(user_id=form.user_id.data).first()
+        if user and check_password_hash(user.password_hash, form.password.data):
+            session['user_id'] = user.user_id
+            session['user_name'] = user.get_full_name()
+            session['is_admin'] = user.is_admin
+            flash('Logged in successfully!', 'success')
+            return redirect(url_for('admin_dashboard') if user.is_admin else url_for('users'))
+        flash('Invalid username or password', 'danger')
+    return render_template('login.html', form=form)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('login'))
+
 @app.route('/', methods=['GET', 'POST'])
 def register():
+    if 'user_id' in session:
+        return redirect(url_for('users'))
+        
     form = RegistrationForm()
     if request.method == 'POST':
         logger.info("Processing registration request")
@@ -95,7 +136,6 @@ def register():
         
         if form.validate():
             try:
-                # Check if user already exists
                 existing_user = User.query.filter(
                     (User.user_id == form.user_id.data) | 
                     (User.email == form.email.data)
@@ -108,7 +148,6 @@ def register():
                         flash('Email already registered. Please use another email.', 'danger')
                     return render_template('register.html', form=form)
 
-                # Create new user
                 user = User()
                 user.user_id = form.user_id.data
                 if form.password.data:
@@ -124,21 +163,18 @@ def register():
                 db.session.add(user)
                 db.session.commit()
                 logger.info(f"New user registered successfully: {user}")
-                flash('Registration successful! You can now log in.', 'success')
+                
+                session['user_id'] = user.user_id
+                session['user_name'] = user.get_full_name()
+                session['is_admin'] = user.is_admin
+                
+                flash('Registration successful!', 'success')
                 return redirect(url_for('users'))
 
             except IntegrityError as e:
                 db.session.rollback()
                 logger.error(f"Database integrity error during registration: {str(e)}")
                 flash('Registration failed due to data conflict. Please try again.', 'danger')
-            except OperationalError as e:
-                db.session.rollback()
-                logger.error(f"Database connection error during registration: {str(e)}")
-                flash('Database connection error. Please try again later.', 'danger')
-            except SQLAlchemyError as e:
-                db.session.rollback()
-                logger.error(f"Database error during registration: {str(e)}")
-                flash('Registration failed due to database error. Please try again.', 'danger')
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"Unexpected error during registration: {str(e)}")
@@ -152,6 +188,7 @@ def register():
     return render_template('register.html', form=form)
 
 @app.route('/users')
+@login_required
 def users():
     try:
         users = User.query.all()
@@ -165,8 +202,54 @@ def users():
         flash('An unexpected error occurred while loading users.', 'danger')
         return redirect(url_for('register'))
 
+@app.route('/admin/dashboard')
+@login_required
+@admin_required
+def admin_dashboard():
+    try:
+        users = User.query.all()
+        total_users = len(users)
+        
+        # Get gender statistics
+        gender_stats = {}
+        for user in users:
+            gender_stats[user.gender] = gender_stats.get(user.gender, 0) + 1
+        
+        # Get latest 5 registered users
+        latest_users = User.query.order_by(User.id.desc()).limit(5).all()
+        
+        return render_template('admin/dashboard.html',
+                             users=users,
+                             total_users=total_users,
+                             gender_stats=gender_stats,
+                             latest_users=latest_users)
+    except Exception as e:
+        logger.error(f"Error accessing admin dashboard: {str(e)}")
+        flash('Error loading admin dashboard.', 'danger')
+        return redirect(url_for('users'))
+
+@app.route('/admin/toggle_admin/<int:user_id>', methods=['POST'])
+@login_required
+@admin_required
+def toggle_admin(user_id):
+    try:
+        user = User.query.get_or_404(user_id)
+        user.is_admin = not user.is_admin
+        db.session.commit()
+        flash(f"Admin status updated for {user.get_full_name()}", 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error toggling admin status: {str(e)}")
+        flash('Error updating admin status.', 'danger')
+    return redirect(url_for('admin_dashboard'))
+
 @app.route('/edit_profile/<int:user_id>', methods=['GET', 'POST'])
+@login_required
 def edit_profile(user_id):
+    if not session.get('is_admin') and str(session.get('user_id')) != str(user_id):
+        flash('You can only edit your own profile.', 'danger')
+        return redirect(url_for('users'))
+
     try:
         logger.info(f"Accessing edit profile page for user_id: {user_id}")
         user = User.query.get_or_404(user_id)
@@ -177,7 +260,6 @@ def edit_profile(user_id):
             logger.debug(f"Form data received: {form.data}")
             
             try:
-                # Check if email is being changed and if it's already taken
                 if user.email != form.email.data:
                     logger.info(f"Email change detected: {user.email} -> {form.email.data}")
                     existing_user = User.query.filter(
@@ -190,17 +272,17 @@ def edit_profile(user_id):
                         flash('Email already registered. Please use another email.', 'danger')
                         return render_template('edit_profile.html', form=form, user=user)
 
-                # Begin transaction
                 logger.debug("Starting database transaction for profile update")
-                
-                # Update user fields using form data
                 form.populate_obj(user)
                 logger.debug(f"Updated user object with form data: {user.first_name} {user.last_name}")
                 
-                # Commit changes
                 logger.debug("Attempting to commit changes to database")
                 db.session.commit()
                 logger.info(f"Profile updated successfully for user: {user.user_id}")
+                
+                # Update session if user updates their own profile
+                if session.get('user_id') == user.user_id:
+                    session['user_name'] = user.get_full_name()
                 
                 flash('Profile updated successfully!', 'success')
                 return redirect(url_for('users'))
@@ -229,7 +311,12 @@ def edit_profile(user_id):
         return redirect(url_for('users'))
 
 @app.route('/generate_pdf/<int:user_id>')
+@login_required
 def generate_pdf(user_id):
+    if not session.get('is_admin') and str(session.get('user_id')) != str(user_id):
+        flash('You can only generate PDF for your own profile.', 'danger')
+        return redirect(url_for('users'))
+
     try:
         user = User.query.get_or_404(user_id)
         html = render_template('user_pdf.html', user=user)

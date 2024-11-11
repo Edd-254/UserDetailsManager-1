@@ -15,14 +15,30 @@
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
+                <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('register') }}">Register</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('users') }}">View Users</a>
                     </li>
+                    {% if session.get('is_admin') %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
+                    </li>
+                    {% endif %}
                 </ul>
+                {% if session.get('user_id') %}
+                <div class="navbar-nav">
+                    <span class="nav-item nav-link text-light">
+                        Welcome, {{ session.get('user_name', '') }}
+                        {% if session.get('is_admin') %}
+                        <span class="badge bg-success ms-2">Admin</span>
+                        {% endif %}
+                    </span>
+                    <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+                </div>
+                {% endif %}
             </div>
         </div>
     </nav>

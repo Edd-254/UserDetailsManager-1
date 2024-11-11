@@ -22,7 +22,7 @@ app = Flask(__name__)
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 
-# Get database URL and verify format
+# Get database URL from environment
 db_url = os.environ.get("DATABASE_URL")
 if not db_url:
     logger.critical("DATABASE_URL environment variable is not set")
@@ -33,7 +33,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "echo": True  # Enable SQL statement logging
+    "echo": True
 }
 
 # Initialize SQLAlchemy
@@ -50,6 +50,7 @@ from models import User
 from forms import RegistrationForm, EditProfileForm, LoginForm
 
 def create_admin_user():
+    """Create admin user with proper transaction handling and verification."""
     try:
         logger.debug("Starting admin user creation process")
         
@@ -57,12 +58,28 @@ def create_admin_user():
         admin = User.query.filter_by(user_id='admin').first()
         if admin:
             logger.info("Admin user already exists")
+            logger.debug(f"Existing admin user attributes: id={admin.id}, "
+                        f"email={admin.email}, is_admin={admin.is_admin}")
             return True
             
-        # Create new admin user
+        # Begin transaction explicitly
+        logger.debug("Starting transaction for admin user creation")
+        
+        # Generate password hash
+        password = 'adminpass123'
+        password_hash = generate_password_hash(password)
+        
+        # Verify password hash is created correctly
+        if not password_hash:
+            logger.error("Failed to generate password hash")
+            return False
+            
+        logger.debug("Password hash generated successfully")
+        
+        # Create new admin user with constructor parameters
         admin = User()
         admin.user_id = 'admin'
-        admin.password_hash = generate_password_hash('adminpass123')
+        admin.password_hash = password_hash
         admin.first_name = 'Admin'
         admin.last_name = 'User'
         admin.address = 'System Address'
@@ -71,19 +88,39 @@ def create_admin_user():
         admin.email = 'admin@system.local'
         admin.is_admin = True
         
+        # Log admin user attributes before commit
+        logger.debug(f"Created admin user with attributes: "
+                    f"user_id={admin.user_id}, "
+                    f"first_name={admin.first_name}, "
+                    f"last_name={admin.last_name}, "
+                    f"email={admin.email}, "
+                    f"is_admin={admin.is_admin}")
+        
+        # Add and commit within transaction
         logger.debug("Adding admin user to session")
         db.session.add(admin)
         
         logger.debug("Committing admin user to database")
         db.session.commit()
         
-        # Verify admin was created
+        # Verify admin was created properly
         created_admin = User.query.filter_by(user_id='admin').first()
-        if not created_admin or not created_admin.is_admin:
-            logger.error("Admin user verification failed")
+        if not created_admin:
+            logger.error("Admin user not found after creation")
+            return False
+            
+        if not created_admin.is_admin:
+            logger.error("Created user is not marked as admin")
+            return False
+            
+        # Verify password hash works
+        if not check_password_hash(created_admin.password_hash, password):
+            logger.error("Password hash verification failed")
             return False
             
         logger.info("Admin user created and verified successfully")
+        logger.debug(f"Verified admin user attributes: id={created_admin.id}, "
+                    f"email={created_admin.email}, is_admin={created_admin.is_admin}")
         return True
         
     except Exception as e:

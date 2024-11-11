@@ -3,10 +3,11 @@ import logging
 from flask import Flask, render_template, request, flash, redirect, url_for, make_response
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from sqlalchemy import text
 import pdfkit
+from flask_mail import Mail, Message
 
 # Configure logging with more detailed format
 logging.basicConfig(
@@ -20,6 +21,16 @@ app = Flask(__name__)
 
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
+
+# Configure Mail
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
+
+mail = Mail(app)
 
 # Get database URL and verify format
 db_url = os.environ.get("DATABASE_URL")
@@ -43,7 +54,7 @@ db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
 # Import forms after app initialization
-from forms import RegistrationForm, EditProfileForm
+from forms import RegistrationForm, EditProfileForm, RequestPasswordResetForm, ResetPasswordForm
 
 def init_db():
     try:
@@ -85,6 +96,58 @@ def init_db():
 
 # Import models after db initialization
 from models import User
+
+def send_reset_email(user):
+    token = user.generate_reset_token()
+    db.session.commit()
+    
+    reset_url = url_for('reset_password', token=token, _external=True)
+    msg = Message('Password Reset Request',
+                  recipients=[user.email])
+    msg.html = render_template('email/reset_password.html',
+                             reset_url=reset_url)
+    mail.send(msg)
+
+@app.route('/reset_password', methods=['GET', 'POST'])
+def request_reset():
+    form = RequestPasswordResetForm()
+    if form.validate_on_submit():
+        try:
+            user = User.query.filter_by(email=form.email.data).first()
+            if user:
+                send_reset_email(user)
+                flash('Reset instructions sent to your email.', 'info')
+                return redirect(url_for('register'))
+            else:
+                flash('Email address not found.', 'danger')
+        except Exception as e:
+            logger.error(f"Error sending reset email: {str(e)}")
+            flash('Error sending reset email. Please try again.', 'danger')
+    
+    return render_template('request_reset.html', form=form)
+
+@app.route('/reset_password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    try:
+        user = User.query.filter_by(reset_token=token).first()
+        if not user or not user.verify_reset_token(token):
+            flash('Invalid or expired reset token.', 'danger')
+            return redirect(url_for('request_reset'))
+
+        form = ResetPasswordForm()
+        if form.validate_on_submit():
+            user.password_hash = generate_password_hash(form.password.data)
+            user.clear_reset_token()
+            db.session.commit()
+            flash('Your password has been reset!', 'success')
+            return redirect(url_for('register'))
+        
+        return render_template('reset_password.html', form=form)
+    
+    except Exception as e:
+        logger.error(f"Error resetting password: {str(e)}")
+        flash('Error resetting password. Please try again.', 'danger')
+        return redirect(url_for('request_reset'))
 
 @app.route('/', methods=['GET', 'POST'])
 def register():

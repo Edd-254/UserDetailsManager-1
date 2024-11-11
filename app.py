@@ -85,8 +85,10 @@ from models import User
 
 def create_admin_user():
     try:
+        logger.debug("Checking for existing admin user...")
         admin = User.query.filter_by(user_id='admin').first()
         if not admin:
+            logger.info("No admin user found, creating new admin user...")
             admin = User(
                 user_id='admin',
                 password_hash=generate_password_hash('adminpass123'),
@@ -98,11 +100,26 @@ def create_admin_user():
                 email='admin@system.local',
                 is_admin=True
             )
-            db.session.add(admin)
-            db.session.commit()
-            logger.info("Admin user created successfully")
+            try:
+                db.session.add(admin)
+                db.session.commit()
+                logger.info("Admin user created successfully")
+                # Verify admin user was saved
+                saved_admin = User.query.filter_by(user_id='admin').first()
+                if saved_admin and saved_admin.is_admin:
+                    logger.info("Admin user verification successful")
+                else:
+                    logger.error("Admin user verification failed - user not found after creation")
+            except IntegrityError:
+                db.session.rollback()
+                logger.error("Failed to create admin user - integrity error")
+            except SQLAlchemyError as e:
+                db.session.rollback()
+                logger.error(f"Failed to create admin user: {str(e)}")
+        else:
+            logger.debug("Admin user already exists")
     except Exception as e:
-        logger.error(f"Error creating admin user: {str(e)}")
+        logger.error(f"Error in create_admin_user: {str(e)}")
 
 def admin_required(f):
     @wraps(f)

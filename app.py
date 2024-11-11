@@ -83,6 +83,27 @@ def init_db():
 # Import models after db initialization
 from models import User
 
+def create_admin_user():
+    try:
+        admin = User.query.filter_by(user_id='admin').first()
+        if not admin:
+            admin = User(
+                user_id='admin',
+                password_hash=generate_password_hash('adminpass123'),
+                first_name='Admin',
+                last_name='User',
+                address='System Address',
+                gender='other',
+                phone='(000) 000-0000',
+                email='admin@system.local',
+                is_admin=True
+            )
+            db.session.add(admin)
+            db.session.commit()
+            logger.info("Admin user created successfully")
+    except Exception as e:
+        logger.error(f"Error creating admin user: {str(e)}")
+
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -333,3 +354,5 @@ def generate_pdf(user_id):
 # Initialize database if needed
 if not init_db():
     logger.critical("Failed to initialize database. Application may not function correctly.")
+else:
+    create_admin_user()

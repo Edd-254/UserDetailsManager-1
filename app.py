@@ -22,7 +22,7 @@ app = Flask(__name__)
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 
-# Get database URL and verify format
+# Get database URL from environment
 db_url = os.environ.get("DATABASE_URL")
 if not db_url:
     logger.critical("DATABASE_URL environment variable is not set")
@@ -33,7 +33,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "echo": True  # Enable SQL statement logging
+    "echo": True
 }
 
 # Initialize SQLAlchemy
@@ -46,7 +46,60 @@ db.init_app(app)
 # Import forms after app initialization
 from forms import RegistrationForm, EditProfileForm, LoginForm
 
+def create_admin_user():
+    """Create admin user with proper transaction handling and verification."""
+    try:
+        logger.debug("Starting admin user creation process...")
+        
+        # First check if admin exists without transaction
+        admin = User.query.filter_by(user_id='admin').first()
+        if admin:
+            logger.info("Admin user already exists - skipping creation")
+            return True
+            
+        logger.info("No admin user found - creating new admin user")
+        
+        # Create new admin user
+        admin = User()
+        admin.user_id = 'admin'
+        admin.password_hash = generate_password_hash('adminpass123')
+        admin.first_name = 'Admin'
+        admin.last_name = 'User'
+        admin.address = 'System Address'
+        admin.gender = 'other'
+        admin.phone = '(000) 000-0000'
+        admin.email = 'admin@system.local'
+        admin.is_admin = True
+        
+        # Use a new session for adding the admin user
+        db.session.add(admin)
+        db.session.commit()
+        logger.info("Admin user creation transaction committed successfully")
+        
+        # Verify admin user was created
+        saved_admin = User.query.filter_by(user_id='admin').first()
+        if saved_admin and saved_admin.is_admin:
+            logger.info("Admin user verified successfully")
+            return True
+        else:
+            logger.error("Admin user verification failed - user not found or not admin")
+            return False
+                
+    except IntegrityError as e:
+        db.session.rollback()
+        logger.error(f"Integrity error creating admin user: {str(e)}")
+        return False
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error(f"Database error creating admin user: {str(e)}")
+        return False
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Unexpected error in create_admin_user: {str(e)}")
+        return False
+
 def init_db():
+    """Initialize database and create admin user."""
     try:
         logger.info("Starting database initialization...")
         with app.app_context():
@@ -72,6 +125,14 @@ def init_db():
                 new_tables = db.inspect(db.engine).get_table_names()
                 logger.debug(f"Tables after creation: {new_tables}")
                 
+                # Create admin user after tables are created
+                logger.info("Attempting to create admin user...")
+                if create_admin_user():
+                    logger.info("Admin user setup completed successfully")
+                else:
+                    logger.error("Failed to setup admin user")
+                    return False
+                
                 return True
             except SQLAlchemyError as e:
                 logger.error(f"Failed to create database tables: {str(e)}")
@@ -82,44 +143,6 @@ def init_db():
 
 # Import models after db initialization
 from models import User
-
-def create_admin_user():
-    try:
-        logger.debug("Checking for existing admin user...")
-        admin = User.query.filter_by(user_id='admin').first()
-        if not admin:
-            logger.info("No admin user found, creating new admin user...")
-            admin = User(
-                user_id='admin',
-                password_hash=generate_password_hash('adminpass123'),
-                first_name='Admin',
-                last_name='User',
-                address='System Address',
-                gender='other',
-                phone='(000) 000-0000',
-                email='admin@system.local',
-                is_admin=True
-            )
-            try:
-                db.session.add(admin)
-                db.session.commit()
-                logger.info("Admin user created successfully")
-                # Verify admin user was saved
-                saved_admin = User.query.filter_by(user_id='admin').first()
-                if saved_admin and saved_admin.is_admin:
-                    logger.info("Admin user verification successful")
-                else:
-                    logger.error("Admin user verification failed - user not found after creation")
-            except IntegrityError:
-                db.session.rollback()
-                logger.error("Failed to create admin user - integrity error")
-            except SQLAlchemyError as e:
-                db.session.rollback()
-                logger.error(f"Failed to create admin user: {str(e)}")
-        else:
-            logger.debug("Admin user already exists")
-    except Exception as e:
-        logger.error(f"Error in create_admin_user: {str(e)}")
 
 def admin_required(f):
     @wraps(f)
@@ -371,5 +394,3 @@ def generate_pdf(user_id):
 # Initialize database if needed
 if not init_db():
     logger.critical("Failed to initialize database. Application may not function correctly.")
-else:
-    create_admin_user()

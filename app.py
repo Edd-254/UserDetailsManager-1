@@ -23,7 +23,7 @@ app = Flask(__name__)
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 
-# Get database URL from environment
+# Get database URL and verify format
 db_url = os.environ.get("DATABASE_URL")
 if not db_url:
     logger.critical("DATABASE_URL environment variable is not set")
@@ -34,7 +34,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "echo": True
+    "echo": True  # Enable SQL statement logging
 }
 
 # Initialize SQLAlchemy
@@ -350,6 +350,26 @@ def toggle_admin(user_id):
         db.session.rollback()
         logger.error(f"Error toggling admin status: {str(e)}")
         flash('Error updating admin status.', 'danger')
+    return redirect(url_for('admin_dashboard'))
+
+@app.route('/admin/delete_user/<int:user_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_user(user_id):
+    try:
+        user = User.query.get_or_404(user_id)
+        if user.user_id == 'admin':
+            flash('Cannot delete admin user.', 'danger')
+        else:
+            user_name = user.get_full_name()
+            db.session.delete(user)
+            db.session.commit()
+            logger.info(f"User {user_name} (ID: {user_id}) deleted successfully")
+            flash(f'User {user_name} deleted successfully.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting user {user_id}: {str(e)}")
+        flash('Error deleting user.', 'danger')
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/edit_profile/<int:user_id>', methods=['GET', 'POST'])

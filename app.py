@@ -22,7 +22,7 @@ app = Flask(__name__)
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 
-# Get database URL from environment
+# Get database URL and verify format
 db_url = os.environ.get("DATABASE_URL")
 if not db_url:
     logger.critical("DATABASE_URL environment variable is not set")
@@ -33,7 +33,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "echo": True
+    "echo": True  # Enable SQL statement logging
 }
 
 # Initialize SQLAlchemy
@@ -57,26 +57,26 @@ def create_admin_user():
         # Check if admin exists
         admin = User.query.filter_by(user_id='admin').first()
         if admin:
-            logger.info("Admin user already exists")
-            logger.debug(f"Existing admin user attributes: id={admin.id}, "
-                        f"email={admin.email}, is_admin={admin.is_admin}")
-            return True
+            # Verify existing admin's password hash
+            password = 'adminpass123'
+            if not check_password_hash(admin.password_hash, password):
+                logger.warning("Admin exists but password verification failed. Recreating admin user.")
+                db.session.delete(admin)
+                db.session.commit()
+            else:
+                logger.info("Admin user already exists with valid password hash")
+                logger.debug(f"Existing admin user attributes: id={admin.id}, "
+                           f"email={admin.email}, is_admin={admin.is_admin}")
+                return True
             
-        # Begin transaction explicitly
-        logger.debug("Starting transaction for admin user creation")
-        
         # Generate password hash
         password = 'adminpass123'
         password_hash = generate_password_hash(password)
         
-        # Verify password hash is created correctly
-        if not password_hash:
-            logger.error("Failed to generate password hash")
-            return False
-            
-        logger.debug("Password hash generated successfully")
+        # Log generated password hash
+        logger.debug(f"Generated password hash: {password_hash}")
         
-        # Create new admin user with constructor parameters
+        # Create new admin user
         admin = User()
         admin.user_id = 'admin'
         admin.password_hash = password_hash
@@ -114,8 +114,13 @@ def create_admin_user():
             return False
             
         # Verify password hash works
-        if not check_password_hash(created_admin.password_hash, password):
+        verification_result = check_password_hash(created_admin.password_hash, password)
+        logger.debug(f"Password hash verification result: {verification_result}")
+        
+        if not verification_result:
             logger.error("Password hash verification failed")
+            db.session.delete(created_admin)
+            db.session.commit()
             return False
             
         logger.info("Admin user created and verified successfully")

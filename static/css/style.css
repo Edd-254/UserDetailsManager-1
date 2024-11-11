@@ -64,3 +64,14 @@
 .btn-sm {
     padding: 0.25rem 0.75rem;
 }
+
+/* Address column styling */
+.address-column {
+    min-width: 200px;
+    max-width: 300px;
+}
+
+.address-column.text-wrap {
+    white-space: normal;
+    word-wrap: break-word;
+}

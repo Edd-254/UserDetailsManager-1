@@ -22,7 +22,7 @@ app = Flask(__name__)
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 
-# Get database URL from environment
+# Get database URL and verify format
 db_url = os.environ.get("DATABASE_URL")
 if not db_url:
     logger.critical("DATABASE_URL environment variable is not set")
@@ -33,7 +33,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "echo": True
+    "echo": True  # Enable SQL statement logging
 }
 
 # Initialize SQLAlchemy
@@ -43,22 +43,22 @@ class Base(DeclarativeBase):
 db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
+# Import models after db initialization
+from models import User
+
 # Import forms after app initialization
 from forms import RegistrationForm, EditProfileForm, LoginForm
 
 def create_admin_user():
-    """Create admin user with proper transaction handling and verification."""
     try:
-        logger.debug("Starting admin user creation process...")
+        logger.debug("Starting admin user creation process")
         
-        # First check if admin exists without transaction
+        # Check if admin exists
         admin = User.query.filter_by(user_id='admin').first()
         if admin:
-            logger.info("Admin user already exists - skipping creation")
+            logger.info("Admin user already exists")
             return True
             
-        logger.info("No admin user found - creating new admin user")
-        
         # Create new admin user
         admin = User()
         admin.user_id = 'admin'
@@ -71,31 +71,24 @@ def create_admin_user():
         admin.email = 'admin@system.local'
         admin.is_admin = True
         
-        # Use a new session for adding the admin user
+        logger.debug("Adding admin user to session")
         db.session.add(admin)
-        db.session.commit()
-        logger.info("Admin user creation transaction committed successfully")
         
-        # Verify admin user was created
-        saved_admin = User.query.filter_by(user_id='admin').first()
-        if saved_admin and saved_admin.is_admin:
-            logger.info("Admin user verified successfully")
-            return True
-        else:
-            logger.error("Admin user verification failed - user not found or not admin")
+        logger.debug("Committing admin user to database")
+        db.session.commit()
+        
+        # Verify admin was created
+        created_admin = User.query.filter_by(user_id='admin').first()
+        if not created_admin or not created_admin.is_admin:
+            logger.error("Admin user verification failed")
             return False
-                
-    except IntegrityError as e:
-        db.session.rollback()
-        logger.error(f"Integrity error creating admin user: {str(e)}")
-        return False
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        logger.error(f"Database error creating admin user: {str(e)}")
-        return False
+            
+        logger.info("Admin user created and verified successfully")
+        return True
+        
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Unexpected error in create_admin_user: {str(e)}")
+        logger.error(f"Error creating admin user: {str(e)}")
         return False
 
 def init_db():
@@ -141,9 +134,6 @@ def init_db():
         logger.error(f"Database initialization failed with unexpected error: {str(e)}")
         return False
 
-# Import models after db initialization
-from models import User
-
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -169,13 +159,23 @@ def login():
         
     form = LoginForm()
     if form.validate_on_submit():
+        logger.debug(f"Login attempt for user_id: {form.user_id.data}")
         user = User.query.filter_by(user_id=form.user_id.data).first()
-        if user and check_password_hash(user.password_hash, form.password.data):
+        
+        if not user:
+            logger.warning(f"No user found with user_id: {form.user_id.data}")
+            flash('Invalid username or password', 'danger')
+            return render_template('login.html', form=form)
+            
+        if check_password_hash(user.password_hash, form.password.data):
+            logger.info(f"Successful login for user: {user.user_id}")
             session['user_id'] = user.user_id
             session['user_name'] = user.get_full_name()
             session['is_admin'] = user.is_admin
             flash('Logged in successfully!', 'success')
             return redirect(url_for('admin_dashboard') if user.is_admin else url_for('users'))
+            
+        logger.warning(f"Invalid password for user: {user.user_id}")
         flash('Invalid username or password', 'danger')
     return render_template('login.html', form=form)
 
@@ -211,8 +211,7 @@ def register():
 
                 user = User()
                 user.user_id = form.user_id.data
-                if form.password.data:
-                    user.password_hash = generate_password_hash(form.password.data)
+                user.password_hash = generate_password_hash(form.password.data)
                 user.first_name = form.first_name.data
                 user.last_name = form.last_name.data
                 user.address = form.address.data
@@ -271,10 +270,12 @@ def admin_dashboard():
         users = User.query.all()
         total_users = len(users)
         
-        # Get gender statistics
-        gender_stats = {}
-        for user in users:
-            gender_stats[user.gender] = gender_stats.get(user.gender, 0) + 1
+        # Get gender statistics using SQLAlchemy
+        gender_stats = db.session.query(
+            User.gender, 
+            func.count(User.id)
+        ).group_by(User.gender).all()
+        gender_stats = dict(gender_stats)
         
         # Get latest 5 registered users
         latest_users = User.query.order_by(User.id.desc()).limit(5).all()

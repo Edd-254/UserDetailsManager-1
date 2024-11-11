@@ -81,7 +81,7 @@
                                             <a href="{{ url_for('edit_profile', user_id=user.id) }}" 
                                                class="btn btn-sm btn-primary">Edit</a>
                                             <form action="{{ url_for('toggle_admin', user_id=user.id) }}" method="POST" class="d-inline">
-                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                {{ form.csrf_token }}
                                                 <button type="submit" class="btn btn-sm {% if user.is_admin %}btn-warning{% else %}btn-success{% endif %}">
                                                     {% if user.is_admin %}Remove Admin{% else %}Make Admin{% endif %}
                                                 </button>

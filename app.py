@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from sqlalchemy import text, func
 from functools import wraps
 import pdfkit
+from flask_wtf import Form
 
 # Configure logging with more detailed format
 logging.basicConfig(
@@ -22,7 +23,7 @@ app = Flask(__name__)
 # Configure Flask app
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_only_for_development")
 
-# Get database URL and verify format
+# Get database URL from environment
 db_url = os.environ.get("DATABASE_URL")
 if not db_url:
     logger.critical("DATABASE_URL environment variable is not set")
@@ -33,7 +34,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "echo": True  # Enable SQL statement logging
+    "echo": True
 }
 
 # Initialize SQLAlchemy
@@ -309,6 +310,9 @@ def users():
 @admin_required
 def admin_dashboard():
     try:
+        # Create form instance for CSRF protection
+        form = Form()
+        
         users = User.query.all()
         total_users = len(users)
         
@@ -326,7 +330,8 @@ def admin_dashboard():
                              users=users,
                              total_users=total_users,
                              gender_stats=gender_stats,
-                             latest_users=latest_users)
+                             latest_users=latest_users,
+                             form=form)  # Pass form to template
     except Exception as e:
         logger.error(f"Error accessing admin dashboard: {str(e)}")
         flash('Error loading admin dashboard.', 'danger')
